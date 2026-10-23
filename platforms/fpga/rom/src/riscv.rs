@@ -168,10 +168,21 @@ unsafe fn init_static<T>(s: *mut core::mem::MaybeUninit<T>, value: T) -> &'stati
 }
 
 pub extern "C" fn rom_entry() -> ! {
+    // Janus pin setup must happen before anything else touches the pins.
+    // Safety: only enabled for Janus builds, where these addresses are mapped.
+    #[cfg(feature = "janus-gpio")]
+    let gpio_result =
+        unsafe { caliptra_mcu_rgpio::janus_gpio_init(caliptra_mcu_rgpio::janus::JANUS_PIN_MAP) };
     print_to_console("FPGA MCU ROM\n");
     unsafe {
         #[allow(static_mut_refs)]
         caliptra_mcu_romtime::set_printer(&mut FPGA_WRITER);
+    }
+    // TODO: decide whether a GPIO init failure should be fatal; for now we
+    // print and continue booting.
+    #[cfg(feature = "janus-gpio")]
+    if let Err(e) = gpio_result {
+        caliptra_mcu_romtime::println!("[mcu-rom] GPIO init failed: {:?}", e);
     }
     unsafe {
         #[allow(static_mut_refs)]

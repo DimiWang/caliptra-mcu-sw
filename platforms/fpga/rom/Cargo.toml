@@ -12,6 +12,7 @@ caliptra-mcu-config-fpga.workspace = true
 
 [dependencies]
 caliptra-mcu-config.workspace = true
+caliptra-mcu-rgpio = { workspace = true, optional = true }
 caliptra-mcu-config-fpga.workspace = true
 caliptra-mcu-rom-common.workspace = true
 caliptra-mcu-registers-generated.workspace = true
@@ -24,6 +25,9 @@ riscv-csr.workspace = true
 rv32i.workspace = true
 
 [features]
+# Initialize Janus RGPIO ports from JANUS_PIN_MAP at the very start of ROM.
+# Off by default: the FPGA does not map the GPIO/PORT addresses.
+janus-gpio = ["dep:caliptra-mcu-rgpio"]
 core_test = ["caliptra-mcu-rom-common/core_test"]
 hw-2-1 = ["caliptra-mcu-rom-common/hw-2-1"]
 test-i3c-services = ["caliptra-mcu-rom-common/test-i3c-services"]

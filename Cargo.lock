@@ -2231,6 +2231,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "caliptra-mcu-rgpio"
+version = "0.1.0"
+dependencies = [
+ "tock-registers",
+]
+
+[[package]]
 name = "caliptra-mcu-rom-common"
 version = "0.1.0"
 dependencies = [
@@ -2275,6 +2282,7 @@ dependencies = [
  "caliptra-mcu-network-hil",
  "caliptra-mcu-ocp",
  "caliptra-mcu-registers-generated",
+ "caliptra-mcu-rgpio",
  "caliptra-mcu-rom-common",
  "caliptra-mcu-romtime",
  "caliptra-mcu-usb-emulator",
@@ -2293,6 +2301,7 @@ dependencies = [
  "caliptra-mcu-config",
  "caliptra-mcu-config-fpga",
  "caliptra-mcu-registers-generated",
+ "caliptra-mcu-rgpio",
  "caliptra-mcu-rom-common",
  "caliptra-mcu-romtime",
  "riscv-csr",

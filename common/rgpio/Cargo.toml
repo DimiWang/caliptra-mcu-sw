@@ -1,0 +1,10 @@
+# Licensed under the Apache-2.0 license
+
+[package]
+name = "caliptra-mcu-rgpio"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+tock-registers.workspace = true

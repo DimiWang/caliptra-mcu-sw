@@ -15,6 +15,7 @@ members = [
     "common/ocp",
     "common/pldm",
     "common/poll",
+    "common/rgpio",
     "common/testing",
     "common/emulator-state",
     "emulator/app",
@@ -328,6 +329,7 @@ caliptra-mcu-pldm-ua = { path = "emulator/bmc/pldm-ua"}
 caliptra-mcu-poll-common = { path = "common/poll"}
 caliptra-mcu-provisioning-common = { path = "provisioning/common" }
 caliptra-mcu-provisioning-fuses = { path = "provisioning/fuses/lib" }
+caliptra-mcu-rgpio = { path = "common/rgpio" }
 caliptra-mcu-registers-generated = { path = "registers/generated-firmware" }
 caliptra-mcu-registers-generator = { path = "registers/generator" }
 caliptra-mcu-registers-systemrdl = { path = "registers/systemrdl" }
