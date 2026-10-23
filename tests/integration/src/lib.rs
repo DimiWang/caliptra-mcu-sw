@@ -123,7 +123,7 @@ mod test {
         /// If true, drive the MCI generic input wire strap that forces the ROM
         /// to use the `CPTRA_SS_OWNER_PK_HASH` fuse as the owner, bypassing DOT.
         pub force_fuse_owner_pk_hash: bool,
-        /// If true, drive the strap telling `dot-bmc-source` ROMs that the
+        /// If true, drive the strap telling the ROM that the
         /// DOT flash is not attached.
         pub dot_flash_absent: bool,
         /// Optional custom MCU ROM bytes (overrides the default/compiled ROM).

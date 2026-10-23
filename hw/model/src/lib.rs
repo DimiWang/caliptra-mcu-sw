@@ -251,7 +251,7 @@ pub struct InitParams<'a> {
     pub force_fuse_owner_pk_hash: bool,
 
     /// When true, drive the MCI generic input wire strap that tells the ROM
-    /// the DOT flash is not attached (honored by `dot-bmc-source` ROMs).
+    /// the DOT flash is not attached (ignored by `no-dot-bmc-source` ROMs).
     pub dot_flash_absent: bool,
 
     pub active_i3c1: bool,
@@ -410,6 +410,12 @@ pub trait McuHwModel {
     fn read_otp_memory(&self) -> Vec<u8>;
 
     fn read_dot_flash(&self) -> Vec<u8>;
+
+    /// Read MCU memory (e.g. the DCCM handoff table) through the MCU bus.
+    /// Returns `None` on models that don't support direct memory reads.
+    fn read_mcu_memory(&mut self, _addr: u32, _len: usize) -> Option<Vec<u8>> {
+        None
+    }
     fn write_dot_flash(&mut self, data: &[u8]) -> Result<()>;
 
     /// The type name of this model

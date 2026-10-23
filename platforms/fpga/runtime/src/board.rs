@@ -424,6 +424,9 @@ pub unsafe fn main() {
     let handoff = HandOff::new();
     if let Some(ref ho) = handoff {
         caliptra_mcu_romtime::println!("[mcu-runtime] HandOff marker: 0x{:08x}", ho.rom.fht_marker);
+        if ho.dot_blob().is_some() {
+            caliptra_mcu_romtime::println!("[mcu-runtime] DOT blob available from handoff (BMC)");
+        }
         if ho.stable_owner_key().is_some() {
             caliptra_mcu_romtime::println!(
                 "[mcu-runtime] Stable owner key CMK available from handoff"

@@ -104,7 +104,6 @@ pub const ROM_ONLY_TEST_FEATURES: &[&str] = &[
     "test-fw-manifest-dot-hitless",
     "test-i3c-services",
     "test-dot-recovery-reset-flow",
-    "dot-bmc-source",
     "test-rom-hooks",
     "test-force-hitless-update",
     "test-svn-manifest",
@@ -160,7 +159,6 @@ pub const ROM_VARIANTS: &[RomVariant] = &[
     RomVariant::new(None, Some("test-fw-manifest-dot-hitless")),
     RomVariant::new(None, Some("test-dot-recovery")),
     RomVariant::new(None, Some("test-dot-recovery-reset-flow")),
-    RomVariant::new(None, Some("dot-bmc-source")),
     RomVariant::new(None, Some("test-rom-hooks")),
     RomVariant::new(None, Some("test-usb-ocp-recovery")),
     // Explicit-feature ROMs tested by precheckin / all-build.

@@ -26,7 +26,7 @@ const STATUS_AWAITING: u8 = 0x80;
 
 /// Maximum number of poll iterations before giving up.
 /// At ~200 MHz AXI clock this gives roughly 5 seconds of polling.
-const MAX_POLL_ITERATIONS: u32 = 200_000_000;
+pub(crate) const MAX_POLL_ITERATIONS: u32 = 200_000_000;
 
 /// Maximum number of poll iterations for the initial STATUS_AWAITING IBI.
 /// Shorter than the normal IBI timeout since the controller may not be
@@ -155,7 +155,7 @@ impl<'a> I3cMailboxHandler<'a> {
         // complete, reset the IBI queue to abort it — a pending IBI in the
         // queue causes the I3C target FSM to stay in DoIBI state and ignore
         // incoming private writes (i3c-core: i3c_target_fsm.sv line 565).
-        self.send_ibi_with_abort(&[STATUS_AWAITING]);
+        let _ = self.send_ibi_with_abort(&[STATUS_AWAITING]);
 
         on_ready();
 
@@ -183,17 +183,24 @@ impl<'a> I3cMailboxHandler<'a> {
     /// Unlike the services loop, the blob is neither verified nor written to
     /// flash here; the caller runs the regular DOT flow on it. Only PING and
     /// DOT_RECOVERY are accepted.
+    ///
+    /// Returns an error right away if no BMC acknowledges the request IBI,
+    /// or after `max_poll_iterations` without a blob.
     pub fn receive_dot_blob(
         &mut self,
+        max_poll_iterations: u32,
         on_ready: impl FnOnce(),
     ) -> Result<[u8; crate::DOT_BLOB_SIZE], McuError> {
-        self.send_ibi_with_abort(&[STATUS_AWAITING]);
+        if !self.send_ibi_with_abort(&[STATUS_AWAITING]) {
+            caliptra_mcu_romtime::println!("[mcu-rom-i3c-svc] No BMC acknowledged DOT request");
+            return Err(McuError::ROM_I3C_SERVICES_TIMEOUT);
+        }
 
         on_ready();
 
         caliptra_mcu_romtime::println!("[mcu-rom-i3c-svc] Waiting for DOT blob from BMC");
 
-        for _ in 0..MAX_POLL_ITERATIONS {
+        for _ in 0..max_poll_iterations {
             if let Some((cmd, payload_len)) = self.try_receive_reassembled_command() {
                 match cmd {
                     CMD_PING => self.send_response(STATUS_SUCCESS, &PONG_PAYLOAD),
@@ -636,7 +643,7 @@ impl<'a> I3cMailboxHandler<'a> {
     /// acknowledge it, reset the target core to force the FSM out of the
     /// DoIBI state (the RTL ties `ibi_abort_i` to 0, so only a soft
     /// reset can recover the FSM once an IBI gets stuck).
-    fn send_ibi_with_abort(&self, data: &[u8]) {
+    fn send_ibi_with_abort(&self, data: &[u8]) -> bool {
         let regs = self.registers;
 
         let ibi_desc = ((MDB_SERVICES as u32) << 24) | (data.len() as u32);
@@ -665,7 +672,7 @@ impl<'a> I3cMailboxHandler<'a> {
                 .is_set(InterruptStatus::IbiDone)
             {
                 let _ = regs.tti_status.read(Status::LastIbiStatus);
-                return;
+                return true;
             }
         }
 
@@ -679,6 +686,7 @@ impl<'a> I3cMailboxHandler<'a> {
         );
         regs.tti_tti_reset_control
             .write(TtiResetControl::IbiQueueRst::SET + TtiResetControl::IbiRetryCtrRst::SET);
+        false
     }
 
     fn reset_data_queues(&self) {

@@ -675,7 +675,7 @@ impl McuHwModel for ModelFpgaRealtime {
         } else {
             gpio1
         };
-        // Tell `dot-bmc-source` ROMs that the DOT flash is not attached.
+        // Tell the ROM that the DOT flash is not attached.
         let gpio1 = if self.dot_flash_absent {
             gpio1 | (1 << 27)
         } else {

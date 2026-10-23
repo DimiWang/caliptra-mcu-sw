@@ -91,7 +91,7 @@ fn record_hook_bit(bit: u32) {
 }
 
 /// Returns the DOT flash, or `None` when the DOT-flash-absent strap is set
-/// (only honored when the BMC DOT source is enabled).
+/// (ignored when built with `no-dot-bmc-source`).
 fn dot_flash_if_attached(
     dot_flash: &dyn caliptra_mcu_rom_common::hil::FlashStorage,
 ) -> Option<&dyn caliptra_mcu_rom_common::hil::FlashStorage> {
@@ -103,7 +103,7 @@ fn dot_flash_if_attached(
             MCU_MEMORY_MAP.mci_offset as *const caliptra_mcu_registers_generated::mci::regs::Mci,
         )
     };
-    if cfg!(feature = "dot-bmc-source")
+    if !cfg!(feature = "no-dot-bmc-source")
         && mci.mci_reg_generic_input_wires[1].get()
             & caliptra_mcu_rom_common::DOT_FLASH_ABSENT_WIRE_BIT
             != 0
@@ -114,11 +114,12 @@ fn dot_flash_if_attached(
     }
 }
 
-/// BMC-backed DOT blob source over I3C, enabled by the `dot-bmc-source` feature.
+/// BMC-backed DOT blob source over I3C (on by default; opt out with the
+/// `no-dot-bmc-source` feature).
 fn dot_bmc_source(
     i3c_target_addr: u8,
 ) -> Option<&'static dyn caliptra_mcu_rom_common::DotRecoveryHandler> {
-    if !cfg!(feature = "dot-bmc-source") {
+    if cfg!(feature = "no-dot-bmc-source") {
         return None;
     }
     static mut DOT_BMC_SOURCE: core::mem::MaybeUninit<caliptra_mcu_rom_common::I3cDotBmcSource> =
@@ -136,6 +137,9 @@ fn dot_bmc_source(
                     as *const caliptra_mcu_registers_generated::mci::regs::Mci,
             ),
             i3c_target_addr,
+            // The emulated BMC pushes the blob right after the request; keep
+            // the wait short so boots without a BMC blob are not slowed down.
+            timeout_iterations: 100_000,
         };
         Some(init_static(&raw mut DOT_BMC_SOURCE, source))
     }

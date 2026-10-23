@@ -31,6 +31,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const DOT_LABEL: &[u8; 23] = b"Caliptra DOT stable key";
 pub const DOT_BLOB_SIZE: usize = core::mem::size_of::<DotBlob>();
+const _: () = assert!(DOT_BLOB_SIZE == caliptra_mcu_romtime::handoff::DOT_BLOB_HANDOFF_SIZE);
 
 #[derive(Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, PartialEq, Eq)]
 pub struct LakPkHash(pub [u32; 12]);

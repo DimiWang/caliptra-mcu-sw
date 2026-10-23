@@ -3927,23 +3927,48 @@ mod test {
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    // ── BMC-backed DOT source (`dot-bmc-source` ROM feature) ─────────────
+    // ── BMC-backed DOT source (default in emulator ROM) ─────────────
 
     const DOT_BMC_RECOVERY_DEVICE_STATUS: u32 = 0x0094_000E;
     const DOT_BMC_REQUEST_LOG: &str = "[mcu-rom] DOT request from BMC";
+    const DOT_HANDOFF_LOG: &str = "[mcu-runtime] DOT blob available from handoff (BMC)";
 
     struct DotBmcRun {
         output: String,
         fatal_error: Option<u32>,
         device_status_0: u32,
+        /// Handoff DOT slot (blob, source, valid marker), when readable.
+        handoff_dot: Option<(Vec<u8>, u32, u32)>,
     }
 
-    /// Boot a `dot-bmc-source` ROM in DOT-locked state. `flash` of `None`
+    /// Byte offset of `HandoffData::rom_dot_blob` (see romtime handoff.rs).
+    const HANDOFF_DOT_BLOB_OFFSET: u32 = 260;
+    const HANDOFF_DOT_VALID_MARKER: u32 = 0x42544F44;
+    const HANDOFF_DOT_SOURCE_BMC: u32 = 1;
+
+    /// Read the handoff DOT slot using the DCCM address the ROM logged.
+    fn read_handoff_dot(hw: &mut impl McuHwModel, output: &str) -> Option<(Vec<u8>, u32, u32)> {
+        let line = output
+            .lines()
+            .find(|l| l.contains("Writing handoff table"))?;
+        let addr = line.rsplit("0x").next()?.trim();
+        let base = u32::from_str_radix(addr, 16).ok()?;
+        let slot = hw.read_mcu_memory(base + HANDOFF_DOT_BLOB_OFFSET, DOT_BLOB_SIZE + 8)?;
+        let word = |o: usize| u32::from_le_bytes(slot[o..o + 4].try_into().unwrap());
+        Some((
+            slot[..DOT_BLOB_SIZE].to_vec(),
+            word(DOT_BLOB_SIZE),
+            word(DOT_BLOB_SIZE + 4),
+        ))
+    }
+
+    /// Boot the default ROM in DOT-locked state. `flash` of `None`
     /// drives the DOT-flash-absent strap. When the ROM asks the BMC for the
     /// blob, the test pushes `bmc_blob` with an I3C DOT_RECOVERY command.
     fn run_dot_bmc_source(
         flash: Option<Vec<u8>>,
         bmc_blob: Option<Vec<u8>>,
+        full_boot: bool,
         expected_output: &str,
     ) -> DotBmcRun {
         use caliptra_mcu_testing_common::i3c_socket::BufferedStream;
@@ -3955,9 +3980,8 @@ mod test {
         let mut hw = start_runtime_hw_model(TestParams {
             dot_flash_absent: flash.is_none(),
             dot_flash_initial_contents: flash,
-            rom_only: true,
+            rom_only: !full_boot,
             otp_memory: Some(create_locked_otp_memory()),
-            rom_feature: Some("dot-bmc-source"),
             i3c_port: Some(i3c_port),
             ..Default::default()
         });
@@ -3989,16 +4013,18 @@ mod test {
         hw.step_until(|m| {
             m.output().search_matched()
                 || m.mci_fw_fatal_error().is_some()
-                || start.elapsed().as_secs() > 120
+                || start.elapsed().as_secs() > 600
         });
         let output = hw.output().take(usize::MAX);
         println!("Test output:\n{output}");
         let fatal_error = hw.mci_fw_fatal_error();
+        let handoff_dot = read_handoff_dot(&mut hw, &output);
         drop(stream);
         DotBmcRun {
             output,
             fatal_error,
             device_status_0,
+            handoff_dot,
         }
     }
 
@@ -4017,11 +4043,17 @@ mod test {
         let run = run_dot_bmc_source(
             Some(create_valid_dot_blob(get_owner_pk_hash(), test_lak()).to_flash_contents()),
             None,
-            "Sending RI_DOWNLOAD_FIRMWARE",
+            true,
+            "[mcu-runtime] HandOff marker",
         );
+        // Booting to runtime without any BMC push proves the flash blob was
+        // used (locked state needs the CAK from DOT); a BMC request without
+        // a response would have failed the boot. ROM UART lines are drained
+        // during a full boot, so only runtime lines are checked.
         assert_eq!(run.fatal_error, None, "ROM hit fatal error");
-        assert!(run.output.contains("[mcu-rom] DOT read"));
-        assert!(!run.output.contains(DOT_BMC_REQUEST_LOG));
+        assert!(run.output.contains("[mcu-runtime] HandOff marker"));
+        // Flash-sourced DOT leaves the handoff DOT slot unused.
+        assert!(!run.output.contains(DOT_HANDOFF_LOG));
 
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
@@ -4035,12 +4067,23 @@ mod test {
         let run = run_dot_bmc_source(
             None,
             Some(valid_locked_dot_blob()),
+            false,
             "[mcu-rom] DOT blob from BMC accepted",
         );
         assert_eq!(run.fatal_error, None, "ROM hit fatal error");
         assert!(run.output.contains("[mcu-rom] DOT flash not attached"));
+        assert!(run.output.contains(DOT_BMC_REQUEST_LOG));
         assert!(!run.output.contains("[mcu-rom] DOT read"));
         assert_eq!(run.device_status_0, DOT_BMC_RECOVERY_DEVICE_STATUS);
+        // The verified BMC blob is published in the ROM->Runtime handoff.
+        assert_eq!(
+            run.handoff_dot,
+            Some((
+                valid_locked_dot_blob(),
+                HANDOFF_DOT_SOURCE_BMC,
+                HANDOFF_DOT_VALID_MARKER
+            ))
+        );
 
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
@@ -4054,10 +4097,14 @@ mod test {
         let run = run_dot_bmc_source(
             Some(vec![0x42u8; 4096]),
             Some(valid_locked_dot_blob()),
+            false,
             "[mcu-rom] DOT blob from BMC accepted",
         );
         assert_eq!(run.fatal_error, None, "ROM hit fatal error");
         assert!(run.output.contains("[mcu-rom] DOT flash blob invalid"));
+        let (blob, _, marker) = run.handoff_dot.expect("handoff readable");
+        assert_eq!(marker, HANDOFF_DOT_VALID_MARKER);
+        assert_eq!(blob, valid_locked_dot_blob());
         assert_eq!(run.device_status_0, DOT_BMC_RECOVERY_DEVICE_STATUS);
 
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -4072,11 +4119,17 @@ mod test {
         let run = run_dot_bmc_source(
             Some(vec![0u8; 4096]),
             Some(vec![0x42u8; DOT_BLOB_SIZE]),
+            false,
             "<run until fatal error>",
         );
         assert_eq!(
             run.fatal_error,
             Some(u32::from(McuError::ROM_COLD_BOOT_DOT_ERROR))
+        );
+        // A rejected BMC blob is never published to Runtime.
+        assert_ne!(
+            run.handoff_dot.map(|(_, _, m)| m),
+            Some(HANDOFF_DOT_VALID_MARKER)
         );
 
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
