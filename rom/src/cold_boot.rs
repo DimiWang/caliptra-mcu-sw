@@ -404,6 +404,7 @@ mod capability_tests {
     }
 }
 
+#[allow(dead_code)] // Flash-based DOT recovery is unused: DOT is loaded from the BMC.
 type I3cRegs = caliptra_mcu_romtime::StaticRef<caliptra_mcu_registers_generated::i3c::regs::I3c>;
 
 /// Returns true when the subsystem debug-intent strap is asserted.
@@ -429,6 +430,7 @@ fn load_required_fuse_owner(env: &RomEnv) -> Option<OwnerPkHash> {
 }
 
 /// Enters DOT recovery reset handling when enabled; otherwise returns to the caller.
+#[allow(dead_code)] // Flash-based DOT recovery is unused: DOT is loaded from the BMC.
 fn maybe_enter_dot_recovery_reset_failure_flow(
     mci: &caliptra_mcu_romtime::Mci,
     i3c_base: I3cRegs,
@@ -447,6 +449,7 @@ fn maybe_enter_dot_recovery_reset_failure_flow(
 ///
 /// On success, re-reads the active copy and runs the normal DOT flow so the
 /// current cold boot can continue with the recovered owner.
+#[allow(dead_code)] // Flash-based DOT recovery is unused: DOT is loaded from the BMC.
 fn attempt_dot_backup_recovery(
     env: &mut RomEnv,
     dot_fuses: &crate::DotFuses,
@@ -484,6 +487,7 @@ fn attempt_dot_backup_recovery(
 /// If it cannot restore a valid active blob, ROM reports the failure to the BMC
 /// through the reset-recovery flow. Platforms using the legacy handler chain
 /// retain their existing behavior when reset recovery is disabled.
+#[allow(dead_code)] // Flash-based DOT recovery is unused: DOT is loaded from the BMC.
 fn recover_locked_dot_or_fail(
     env: &mut RomEnv,
     dot_fuses: &crate::DotFuses,
@@ -1154,6 +1158,7 @@ impl ColdBoot {
 /// The integrator controls the order and retry policy via
 /// `RomParameters::dot_locked_recovery_handlers`.
 #[inline(never)]
+#[allow(dead_code)] // Flash-based DOT recovery is unused: DOT is loaded from the BMC.
 fn attempt_dot_locked_recovery(
     env: &mut RomEnv,
     dot_fuses: &crate::DotFuses,
@@ -1733,35 +1738,31 @@ impl BootFlow for ColdBoot {
             load_required_fuse_owner(env)
         } else if !is_production_lifecycle(&env.mci) {
             device_ownership_transfer::load_owner_pkhash(&env.otp)
-        } else if let Some(dot_flash) = params.dot_flash {
-            caliptra_mcu_romtime::println!("[mcu-rom] DOT read");
-            let mut dot_blob = [0u8; device_ownership_transfer::DOT_BLOB_SIZE];
-            if let Err(err) = dot_flash.read(&mut dot_blob, 0) {
-                caliptra_mcu_romtime::println!(
-                    "[mcu-rom] DOT read err: {}",
-                    HexWord(usize::from(err) as u32)
-                );
-                fatal_error(McuError::ROM_COLD_BOOT_DOT_ERROR);
-            }
+        } else if let Some(dot_bmc) = params.dot_recovery_handler {
+            // DOT blob is always transferred by the BMC; no flash attached to
+            // the chip is read.
+            caliptra_mcu_romtime::println!("[mcu-rom] DOT request from BMC");
+            let dot_blob = match dot_bmc.read_recovery_blob() {
+                Ok(blob) => blob,
+                Err(err) => {
+                    caliptra_mcu_romtime::println!(
+                        "[mcu-rom] DOT BMC read err: {}",
+                        HexWord(err.into())
+                    );
+                    fatal_error(McuError::ROM_COLD_BOOT_DOT_ERROR);
+                }
+            };
             mci.set_flow_checkpoint(McuRomBootStatus::DeviceOwnershipTransferFlashRead.into());
 
             if dot_blob.iter().all(|&b| b == 0) || dot_blob.iter().all(|&b| b == 0xFF) {
                 if dot_fuses.enabled && dot_fuses.is_locked() {
-                    recover_locked_dot_or_fail(
-                        env,
-                        &dot_fuses,
-                        &params,
-                        dot_flash,
-                        i3c_base,
-                        McuError::ROM_COLD_BOOT_DOT_ERROR,
-                        false,
-                    )
-                } else {
-                    caliptra_mcu_romtime::println!("[mcu-rom] DOT empty");
-                    device_ownership_transfer::load_owner_pkhash(&env.otp)
+                    caliptra_mcu_romtime::println!("[mcu-rom] DOT empty while locked");
+                    fatal_error(McuError::ROM_COLD_BOOT_DOT_ERROR);
                 }
+                caliptra_mcu_romtime::println!("[mcu-rom] DOT empty");
+                device_ownership_transfer::load_owner_pkhash(&env.otp)
             } else {
-                let dot_blob = DotBlob::read_from_bytes(&dot_blob).unwrap();
+                let dot_blob: DotBlob = transmute!(dot_blob);
                 match device_ownership_transfer::dot_flow(
                     env,
                     &dot_fuses,
@@ -1772,22 +1773,16 @@ impl BootFlow for ColdBoot {
                 ) {
                     Ok(owner) => owner,
                     Err(err) => {
-                        if dot_fuses.is_locked() {
-                            recover_locked_dot_or_fail(
-                                env, &dot_fuses, &params, dot_flash, i3c_base, err, true,
-                            )
-                        } else {
-                            caliptra_mcu_romtime::println!(
-                                "[mcu-rom] DOT err: {}",
-                                HexWord(err.into())
-                            );
-                            fatal_error(err)
-                        }
+                        caliptra_mcu_romtime::println!(
+                            "[mcu-rom] DOT err: {}",
+                            HexWord(err.into())
+                        );
+                        fatal_error(err)
                     }
                 }
             }
         } else {
-            // No DOT flash configured, use owner PK hash from fuses
+            // No BMC DOT source configured, use owner PK hash from fuses
             device_ownership_transfer::load_owner_pkhash(&env.otp)
         };
 
