@@ -88,6 +88,7 @@ pub struct ModelFpgaRealtime {
     /// each IBI it sees. We must discard those stale client reads.
     i3c_ibi_reads_pending: u32,
     flash_boot: bool,
+    dot_flash_absent: bool,
     check_booted_to_runtime: bool,
     caliptra_firmware: Option<Vec<u8>>,
     soc_manifest: Option<Vec<u8>>,
@@ -633,6 +634,7 @@ impl McuHwModel for ModelFpgaRealtime {
             i3c_client_read_retries: 0,
             i3c_ibi_reads_pending: 0,
             flash_boot: params.flash_boot,
+            dot_flash_absent: params.dot_flash_absent,
             check_booted_to_runtime: params.check_booted_to_runtime,
             caliptra_firmware: Some(params.caliptra_firmware.to_vec()).filter(|f| !f.is_empty()),
             soc_manifest: Some(params.soc_manifest.to_vec()).filter(|f| !f.is_empty()),
@@ -670,6 +672,12 @@ impl McuHwModel for ModelFpgaRealtime {
         // Notify MCU ROM whether or not we are going to flash boot
         let gpio1 = if self.flash_boot {
             gpio1 | (1 << 29)
+        } else {
+            gpio1
+        };
+        // Tell `dot-bmc-source` ROMs that the DOT flash is not attached.
+        let gpio1 = if self.dot_flash_absent {
+            gpio1 | (1 << 27)
         } else {
             gpio1
         };

@@ -60,6 +60,7 @@ mod firmware_headers;
 mod fw_boot;
 mod warm_boot;
 pub use cold_boot::ColdBoot;
+pub use cold_boot::I3cDotBmcSource;
 pub use cold_boot::I3cDotLockedRecoveryHandler;
 pub use fw_boot::FwBoot;
 pub use warm_boot::WarmBoot;

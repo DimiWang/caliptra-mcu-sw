@@ -90,6 +90,57 @@ fn record_hook_bit(bit: u32) {
     }
 }
 
+/// Returns the DOT flash, or `None` when the DOT-flash-absent strap is set
+/// (only honored when the BMC DOT source is enabled).
+fn dot_flash_if_attached(
+    dot_flash: &dyn caliptra_mcu_rom_common::hil::FlashStorage,
+) -> Option<&dyn caliptra_mcu_rom_common::hil::FlashStorage> {
+    use tock_registers::interfaces::Readable;
+    // Safety: `MCU_MEMORY_MAP.mci_offset` is the linker-provided MCI register
+    // block base; the resulting reference is only used for typed reads.
+    let mci: caliptra_mcu_romtime::StaticRef<caliptra_mcu_registers_generated::mci::regs::Mci> = unsafe {
+        caliptra_mcu_romtime::StaticRef::new(
+            MCU_MEMORY_MAP.mci_offset as *const caliptra_mcu_registers_generated::mci::regs::Mci,
+        )
+    };
+    if cfg!(feature = "dot-bmc-source")
+        && mci.mci_reg_generic_input_wires[1].get()
+            & caliptra_mcu_rom_common::DOT_FLASH_ABSENT_WIRE_BIT
+            != 0
+    {
+        None
+    } else {
+        Some(dot_flash)
+    }
+}
+
+/// BMC-backed DOT blob source over I3C, enabled by the `dot-bmc-source` feature.
+fn dot_bmc_source(
+    i3c_target_addr: u8,
+) -> Option<&'static dyn caliptra_mcu_rom_common::DotRecoveryHandler> {
+    if !cfg!(feature = "dot-bmc-source") {
+        return None;
+    }
+    static mut DOT_BMC_SOURCE: core::mem::MaybeUninit<caliptra_mcu_rom_common::I3cDotBmcSource> =
+        core::mem::MaybeUninit::uninit();
+    // Safety: the I3C and MCI bases are linker-provided register blocks, and
+    // the static is initialized once before `rom_start` in a single-hart ROM.
+    unsafe {
+        let source = caliptra_mcu_rom_common::I3cDotBmcSource {
+            i3c_base: caliptra_mcu_romtime::StaticRef::new(
+                MCU_MEMORY_MAP.i3c_offset
+                    as *const caliptra_mcu_registers_generated::i3c::regs::I3c,
+            ),
+            mci_base: caliptra_mcu_romtime::StaticRef::new(
+                MCU_MEMORY_MAP.mci_offset
+                    as *const caliptra_mcu_registers_generated::mci::regs::Mci,
+            ),
+            i3c_target_addr,
+        };
+        Some(init_static(&raw mut DOT_BMC_SOURCE, source))
+    }
+}
+
 /// Read the MCI generic-input-wire strap selecting the owner PK hash source.
 fn read_owner_pk_hash_policy() -> caliptra_mcu_rom_common::OwnerPkHashPolicy {
     use tock_registers::interfaces::Readable;
@@ -461,7 +512,8 @@ pub extern "C" fn rom_entry() -> ! {
                 let manager = ImageProviderManager::new($entries);
                 caliptra_mcu_rom_common::rom_start(RomParameters {
                     image_provider_manager: Some(manager),
-                    dot_flash: Some(dot_flash),
+                    dot_flash: dot_flash_if_attached(dot_flash),
+                    dot_bmc_source: dot_bmc_source(0x5a),
                     owner_pk_hash_policy: read_owner_pk_hash_policy(),
                     request_recovery_boot: true,
                     cptra_mbox_axi_users: mbox_axi_users,
@@ -535,7 +587,8 @@ pub extern "C" fn rom_entry() -> ! {
             mcu_image_verifier: Some(&mcu_image_verifier),
             mcu_image_header_size: core::mem::size_of::<caliptra_mcu_image_header::McuImageHeader>(
             ),
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             owner_pk_hash_policy: read_owner_pk_hash_policy(),
             otp_enable_integrity_check: true,
             otp_enable_consistency_check: true,
@@ -555,7 +608,8 @@ pub extern "C" fn rom_entry() -> ! {
         feature = "test-fw-manifest-dot-hitless"
     )) {
         caliptra_mcu_rom_common::rom_start(RomParameters {
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             owner_pk_hash_policy: read_owner_pk_hash_policy(),
             fw_manifest_dot_enabled: true,
             otp_enable_integrity_check: true,
@@ -659,7 +713,8 @@ pub extern "C" fn rom_entry() -> ! {
 
             caliptra_mcu_rom_common::rom_start(RomParameters {
                 image_provider_manager: Some(manager),
-                dot_flash: Some(dot_flash),
+                dot_flash: dot_flash_if_attached(dot_flash),
+                dot_bmc_source: dot_bmc_source(0x5a),
                 cptra_mbox_axi_users: mbox_axi_users,
                 cptra_fuse_axi_user: axi_user0,
                 cptra_trng_axi_user: axi_user0,
@@ -693,7 +748,8 @@ pub extern "C" fn rom_entry() -> ! {
             },
         ];
         caliptra_mcu_rom_common::rom_start(RomParameters {
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             owner_pk_hash_policy: read_owner_pk_hash_policy(),
             svn_manifest_enabled: true,
             svn_fuse_map: SVN_FUSE_MAP,
@@ -713,7 +769,8 @@ pub extern "C" fn rom_entry() -> ! {
     } else if cfg!(feature = "test-network-boot") {
         #[cfg(feature = "test-network-boot")]
         caliptra_mcu_rom_common::rom_start(RomParameters {
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             request_network_boot: true,
             cptra_mbox_axi_users: mbox_axi_users,
             cptra_fuse_axi_user: axi_user0,
@@ -759,7 +816,8 @@ pub extern "C" fn rom_entry() -> ! {
 
         caliptra_mcu_rom_common::rom_start(RomParameters {
             image_provider_manager: Some(manager),
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             owner_pk_hash_policy: read_owner_pk_hash_policy(),
             // Let the generic wire (bit 29 of mci_reg_generic_input_wires[1]) control flash boot
             // request_recovery_boot defaults to false - emulator sets the wire when flash boot is requested
@@ -821,7 +879,8 @@ pub extern "C" fn rom_entry() -> ! {
         let hooks = LoggingRomHooks;
 
         caliptra_mcu_rom_common::rom_start(RomParameters {
-            dot_flash: Some(dot_flash),
+            dot_flash: dot_flash_if_attached(dot_flash),
+            dot_bmc_source: dot_bmc_source(0x5a),
             owner_pk_hash_policy: read_owner_pk_hash_policy(),
             cptra_mbox_axi_users: mbox_axi_users,
             cptra_fuse_axi_user: axi_user0,

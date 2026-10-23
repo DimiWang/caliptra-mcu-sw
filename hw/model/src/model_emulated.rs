@@ -373,6 +373,9 @@ impl McuHwModel for ModelEmulated {
             if params.force_fuse_owner_pk_hash {
                 wire1 |= 1 << 28;
             }
+            if params.dot_flash_absent {
+                wire1 |= 1 << 27;
+            }
             [0, wire1]
         };
         let mci_regs = ext_mci.regs.clone();

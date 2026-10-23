@@ -178,6 +178,44 @@ impl<'a> I3cMailboxHandler<'a> {
         Err(McuError::ROM_I3C_SERVICES_TIMEOUT)
     }
 
+    /// Wait for the BMC to push a DOT blob with DOT_RECOVERY and return it.
+    ///
+    /// Unlike the services loop, the blob is neither verified nor written to
+    /// flash here; the caller runs the regular DOT flow on it. Only PING and
+    /// DOT_RECOVERY are accepted.
+    pub fn receive_dot_blob(
+        &mut self,
+        on_ready: impl FnOnce(),
+    ) -> Result<[u8; crate::DOT_BLOB_SIZE], McuError> {
+        self.send_ibi_with_abort(&[STATUS_AWAITING]);
+
+        on_ready();
+
+        caliptra_mcu_romtime::println!("[mcu-rom-i3c-svc] Waiting for DOT blob from BMC");
+
+        for _ in 0..MAX_POLL_ITERATIONS {
+            if let Some((cmd, payload_len)) = self.try_receive_reassembled_command() {
+                match cmd {
+                    CMD_PING => self.send_response(STATUS_SUCCESS, &PONG_PAYLOAD),
+                    CMD_DOT_RECOVERY if payload_len >= crate::DOT_BLOB_SIZE => {
+                        let mut blob = [0u8; crate::DOT_BLOB_SIZE];
+                        read_bytes_from_words(self.reassembly_buf, 0, &mut blob);
+                        self.zeroize_reassembly();
+                        self.send_status(STATUS_SUCCESS);
+                        return Ok(blob);
+                    }
+                    CMD_DOT_RECOVERY => self.send_status(STATUS_INVALID_PAYLOAD),
+                    _ => self.send_status(STATUS_INVALID_CMD),
+                }
+                self.zeroize_reassembly();
+            }
+        }
+
+        self.zeroize_reassembly();
+        self.reset_data_queues();
+        Err(McuError::ROM_I3C_SERVICES_TIMEOUT)
+    }
+
     /// Check whether DOT commands are available.
     fn dot_enabled(&self) -> bool {
         self.services

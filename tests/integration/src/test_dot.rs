@@ -3926,4 +3926,159 @@ mod test {
         println!("[TEST] Runtime boots correctly with DOT manifest header prepended");
         lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
+
+    // ── BMC-backed DOT source (`dot-bmc-source` ROM feature) ─────────────
+
+    const DOT_BMC_RECOVERY_DEVICE_STATUS: u32 = 0x0094_000E;
+    const DOT_BMC_REQUEST_LOG: &str = "[mcu-rom] DOT request from BMC";
+
+    struct DotBmcRun {
+        output: String,
+        fatal_error: Option<u32>,
+        device_status_0: u32,
+    }
+
+    /// Boot a `dot-bmc-source` ROM in DOT-locked state. `flash` of `None`
+    /// drives the DOT-flash-absent strap. When the ROM asks the BMC for the
+    /// blob, the test pushes `bmc_blob` with an I3C DOT_RECOVERY command.
+    fn run_dot_bmc_source(
+        flash: Option<Vec<u8>>,
+        bmc_blob: Option<Vec<u8>>,
+        expected_output: &str,
+    ) -> DotBmcRun {
+        use caliptra_mcu_testing_common::i3c_socket::BufferedStream;
+        use random_port::PortPicker;
+        use std::net::{SocketAddr, TcpStream};
+
+        const CMD_DOT_RECOVERY: u8 = 0x02;
+        let i3c_port = PortPicker::new().random(true).pick().unwrap();
+        let mut hw = start_runtime_hw_model(TestParams {
+            dot_flash_absent: flash.is_none(),
+            dot_flash_initial_contents: flash,
+            rom_only: true,
+            otp_memory: Some(create_locked_otp_memory()),
+            rom_feature: Some("dot-bmc-source"),
+            i3c_port: Some(i3c_port),
+            ..Default::default()
+        });
+        hw.start_i3c_controller();
+        let addr = SocketAddr::from(([127, 0, 0, 1], hw.i3c_port().unwrap()));
+        let target_addr = hw.i3c_address().unwrap();
+        let mut stream =
+            BufferedStream::new(TcpStream::connect(addr).expect("Failed to connect to I3C socket"));
+
+        let start = std::time::Instant::now();
+        let mut device_status_0 = 0;
+        if let Some(blob) = bmc_blob {
+            let ready = u16::from(McuRomBootStatus::I3cServicesReady);
+            hw.step_until(|m| {
+                m.mci_boot_checkpoint() == ready
+                    || m.mci_fw_fatal_error().is_some()
+                    || start.elapsed().as_secs() > 120
+            });
+            assert_eq!(
+                hw.mci_boot_checkpoint(),
+                ready,
+                "ROM did not request the DOT blob from the BMC"
+            );
+            device_status_0 = hw.i3c_recovery_device_status_0();
+            stream.send_packetized_write(target_addr, CMD_DOT_RECOVERY, &blob);
+        }
+
+        hw.output().set_search_term(expected_output);
+        hw.step_until(|m| {
+            m.output().search_matched()
+                || m.mci_fw_fatal_error().is_some()
+                || start.elapsed().as_secs() > 120
+        });
+        let output = hw.output().take(usize::MAX);
+        println!("Test output:\n{output}");
+        let fatal_error = hw.mci_fw_fatal_error();
+        drop(stream);
+        DotBmcRun {
+            output,
+            fatal_error,
+            device_status_0,
+        }
+    }
+
+    fn valid_locked_dot_blob() -> Vec<u8> {
+        create_valid_dot_blob(get_owner_pk_hash(), test_lak())
+            .as_bytes()
+            .to_vec()
+    }
+
+    /// Valid DOT blob in flash: used exactly as before; BMC is not asked.
+    #[test]
+    fn test_dot_bmc_source_flash_valid_uses_flash() {
+        let lock = TEST_LOCK.lock().unwrap();
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let run = run_dot_bmc_source(
+            Some(create_valid_dot_blob(get_owner_pk_hash(), test_lak()).to_flash_contents()),
+            None,
+            "Sending RI_DOWNLOAD_FIRMWARE",
+        );
+        assert_eq!(run.fatal_error, None, "ROM hit fatal error");
+        assert!(run.output.contains("[mcu-rom] DOT read"));
+        assert!(!run.output.contains(DOT_BMC_REQUEST_LOG));
+
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// No DOT flash attached: ROM reports to the BMC and uses the BMC blob.
+    #[test]
+    fn test_dot_bmc_source_no_flash_loads_from_bmc() {
+        let lock = TEST_LOCK.lock().unwrap();
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let run = run_dot_bmc_source(
+            None,
+            Some(valid_locked_dot_blob()),
+            "[mcu-rom] DOT blob from BMC accepted",
+        );
+        assert_eq!(run.fatal_error, None, "ROM hit fatal error");
+        assert!(run.output.contains("[mcu-rom] DOT flash not attached"));
+        assert!(!run.output.contains("[mcu-rom] DOT read"));
+        assert_eq!(run.device_status_0, DOT_BMC_RECOVERY_DEVICE_STATUS);
+
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Corrupted flash blob: ROM reports to the BMC and uses the BMC blob.
+    #[test]
+    fn test_dot_bmc_source_corrupt_flash_loads_from_bmc() {
+        let lock = TEST_LOCK.lock().unwrap();
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let run = run_dot_bmc_source(
+            Some(vec![0x42u8; 4096]),
+            Some(valid_locked_dot_blob()),
+            "[mcu-rom] DOT blob from BMC accepted",
+        );
+        assert_eq!(run.fatal_error, None, "ROM hit fatal error");
+        assert!(run.output.contains("[mcu-rom] DOT flash blob invalid"));
+        assert_eq!(run.device_status_0, DOT_BMC_RECOVERY_DEVICE_STATUS);
+
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Locked device, empty flash, and an invalid BMC blob: fatal error.
+    #[test]
+    fn test_dot_bmc_source_locked_all_fail_is_fatal() {
+        let lock = TEST_LOCK.lock().unwrap();
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let run = run_dot_bmc_source(
+            Some(vec![0u8; 4096]),
+            Some(vec![0x42u8; DOT_BLOB_SIZE]),
+            "<run until fatal error>",
+        );
+        assert_eq!(
+            run.fatal_error,
+            Some(u32::from(McuError::ROM_COLD_BOOT_DOT_ERROR))
+        );
+
+        lock.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
