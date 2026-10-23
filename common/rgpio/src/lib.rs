@@ -3,12 +3,13 @@
 //! RGPIO (NXP-style) port initialization from a static pin map.
 //!
 //! RGPIO has no pin-mux register; alternate functions live in a separate
-//! PORT/IOMUX block. Alt-function entries are passed to a [`PinMux`]
-//! implementation ([`NoPinMux`] until the PORT block is known).
+//! PORT/IOMUX block. Mux requests go to a [`PinMux`] implementation; Janus
+//! uses [`port::PortPinMux`] (placeholder base and layout, see `port.rs`).
 
 #![cfg_attr(not(test), no_std)]
 
 pub mod janus;
+pub mod port;
 pub mod regs;
 
 use regs::RgpioRegisters;
@@ -22,6 +23,7 @@ pub enum GpioPort {
     Gpio2,
     Gpio3,
     Gpio4,
+    Gpio5,
     Gpio6,
 }
 
@@ -45,6 +47,21 @@ pub enum AltFn {
     Alt13,
     Alt14,
     Alt15,
+}
+
+impl GpioPort {
+    /// Numeric port index (GPIO5 -> 5).
+    pub const fn index(self) -> usize {
+        match self {
+            GpioPort::Gpio0 => 0,
+            GpioPort::Gpio1 => 1,
+            GpioPort::Gpio2 => 2,
+            GpioPort::Gpio3 => 3,
+            GpioPort::Gpio4 => 4,
+            GpioPort::Gpio5 => 5,
+            GpioPort::Gpio6 => 6,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,15 +122,14 @@ impl PinConfig {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpioError {
-    /// LOCK register is non-zero; port configuration is frozen.
-    PortLocked(GpioPort),
-    /// The pin mux hook could not apply an alternate function.
+    /// The port register block lookup returned nothing for this port.
+    NoSuchPort(GpioPort),
+    /// The pin mux hook could not apply the requested function.
     PinMuxUnavailable(GpioPort, u8),
 }
 
 /// Register-level access to one RGPIO port (abstracted for unit tests).
 pub trait RgpioPort {
-    fn lock(&self) -> u32;
     fn pdor(&self) -> u32;
     fn pddr(&self) -> u32;
     fn pidr(&self) -> u32;
@@ -124,9 +140,6 @@ pub trait RgpioPort {
 }
 
 impl RgpioPort for RgpioRegisters {
-    fn lock(&self) -> u32 {
-        self.lock.get()
-    }
     fn pdor(&self) -> u32 {
         self.pdor.get()
     }
@@ -159,8 +172,7 @@ pub trait PinMux {
     }
 }
 
-/// Placeholder until the PORT/IOMUX base address and layout are known.
-/// TODO: implement once the Janus PORT block is documented.
+/// Mux that rejects every request (useful for GPIO-only maps / tests).
 pub struct NoPinMux;
 
 impl PinMux for NoPinMux {
@@ -169,27 +181,19 @@ impl PinMux for NoPinMux {
     }
 }
 
-/// Configure every entry of `map`.
+/// Configure every entry of `map` (no LOCK handling: registers are just written).
 ///
-/// * Ports with a non-zero LOCK are rejected before anything is written.
 /// * Outputs: the init level is written via PSOR/PCOR *before* PDDR is set,
 ///   so the pin never glitches to a stale PDOR value.
 /// * Inputs: PDDR bit cleared, PIDR bit cleared (or set if input disabled).
-/// * Alt functions: forwarded to `mux`.
+/// * Mux: `mux.set_alt` for alt functions, `mux.set_gpio` for GPIO pins.
 pub fn gpio_init<'a, P: RgpioPort + 'a, M: PinMux>(
     map: &[PinConfig],
     port_regs: impl Fn(GpioPort) -> Option<&'a P>,
     mux: &M,
 ) -> Result<(), GpioError> {
-    // Check locks up front so a locked port leaves everything untouched.
     for e in map {
-        match port_regs(e.port) {
-            Some(r) if r.lock() == 0 => {}
-            _ => return Err(GpioError::PortLocked(e.port)),
-        }
-    }
-    for e in map {
-        let regs = port_regs(e.port).ok_or(GpioError::PortLocked(e.port))?;
+        let regs = port_regs(e.port).ok_or(GpioError::NoSuchPort(e.port))?;
         let bit = 1u32 << e.pin;
         match e.function {
             PinFunction::Alt(alt) => mux.set_alt(e.port, e.pin, alt)?,
@@ -218,15 +222,19 @@ pub fn gpio_init<'a, P: RgpioPort + 'a, M: PinMux>(
     Ok(())
 }
 
-/// Initialize the Janus GPIO ports from `map` using the real MMIO blocks.
+/// Initialize the Janus GPIO ports from `map` using the real MMIO blocks and
+/// the (placeholder) Janus PORT pin mux.
 ///
 /// # Safety
-/// Must only be called on Janus hardware where the GPIO bases are mapped.
-pub unsafe fn janus_gpio_init<M: PinMux>(map: &[PinConfig], mux: &M) -> Result<(), GpioError> {
+/// Must only be called on Janus hardware where the GPIO and PORT bases are mapped.
+pub unsafe fn janus_gpio_init(map: &[PinConfig]) -> Result<(), GpioError> {
+    let mux = port::PortPinMux::new(|p| {
+        Some(&*(janus::janus_port_base(p) as *const port::PortRegisters))
+    });
     gpio_init(
         map,
         |p| Some(&*(janus::janus_gpio_base(p) as *const RgpioRegisters)),
-        mux,
+        &mux,
     )
 }
 
