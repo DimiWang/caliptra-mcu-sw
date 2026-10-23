@@ -50,6 +50,17 @@ pub enum AltFn {
 }
 
 impl GpioPort {
+    /// All ports, in index order.
+    pub const ALL: [GpioPort; 7] = [
+        GpioPort::Gpio0,
+        GpioPort::Gpio1,
+        GpioPort::Gpio2,
+        GpioPort::Gpio3,
+        GpioPort::Gpio4,
+        GpioPort::Gpio5,
+        GpioPort::Gpio6,
+    ];
+
     /// Numeric port index (GPIO5 -> 5).
     pub const fn index(self) -> usize {
         match self {

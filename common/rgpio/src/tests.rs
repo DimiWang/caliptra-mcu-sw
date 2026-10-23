@@ -107,21 +107,51 @@ fn writes_regardless_of_lock_and_missing_port_errors() {
 }
 
 #[test]
-fn alt_functions_go_to_mux() {
-    let p = MockPort::default();
+fn default_map_is_all_inputs() {
+    assert_eq!(JANUS_PIN_MAP.len(), 7 * 32);
+    for (i, e) in JANUS_PIN_MAP.iter().enumerate() {
+        assert_eq!(e.port, GpioPort::ALL[i / 32]);
+        assert_eq!(e.pin as usize, i % 32);
+        assert_eq!(e.function, PinFunction::input());
+    }
+    let p = MockPort {
+        pddr: RefCell::new(0xffff_ffff),
+        pidr: RefCell::new(0xffff_ffff),
+        ..Default::default()
+    };
     let mux = RecMux::default();
     gpio_init(JANUS_PIN_MAP, |_| Some(&p), &mux).unwrap();
-    assert_eq!(
-        *mux.0.borrow(),
-        vec![
-            (GpioPort::Gpio1, 4, AltFn::Alt2),
-            (GpioPort::Gpio1, 5, AltFn::Alt2)
-        ]
+    assert!(mux.0.borrow().is_empty());
+    assert_eq!(p.pddr(), 0);
+    assert_eq!(p.pidr(), 0);
+    assert!(!p
+        .log
+        .borrow()
+        .iter()
+        .any(|op| matches!(op, Op::Psor(_) | Op::Pcor(_))));
+}
+
+#[test]
+fn set_pin_overrides_one_entry() {
+    use janus::{all_inputs, set_pin, JanusPinMap};
+    const MAP: JanusPinMap = set_pin(
+        all_inputs(),
+        GpioPort::Gpio1,
+        4,
+        PinFunction::Alt(AltFn::Alt2),
     );
-    // pin 31 input with buffer disabled
-    assert_eq!(p.pidr() & (1 << 31), 1 << 31);
-    assert_eq!(p.pddr(), 0b11);
-    assert_eq!(p.pdor(), 0b10);
+    const MAP2: JanusPinMap = set_pin(MAP, GpioPort::Gpio6, 31, PinFunction::output(Level::High));
+    assert_eq!(
+        MAP2[32 + 4],
+        PinConfig::new(GpioPort::Gpio1, 4, PinFunction::Alt(AltFn::Alt2))
+    );
+    assert_eq!(MAP2[6 * 32 + 31].function, PinFunction::output(Level::High));
+    assert_eq!(
+        MAP2.iter()
+            .filter(|e| e.function != PinFunction::input())
+            .count(),
+        2
+    );
 }
 
 #[test]
