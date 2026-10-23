@@ -2301,6 +2301,7 @@ dependencies = [
  "caliptra-mcu-config",
  "caliptra-mcu-config-fpga",
  "caliptra-mcu-registers-generated",
+ "caliptra-mcu-rgpio",
  "caliptra-mcu-rom-common",
  "caliptra-mcu-romtime",
  "riscv-csr",

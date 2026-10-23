@@ -228,6 +228,8 @@ pub extern "C" fn rom_entry() -> ! {
         #[allow(static_mut_refs)]
         caliptra_mcu_romtime::set_printer(&mut EMULATOR_WRITER);
     }
+    // TODO: decide whether a GPIO init failure should be fatal; for now we
+    // print and continue booting.
     #[cfg(feature = "janus-gpio")]
     if let Err(e) = gpio_result {
         caliptra_mcu_romtime::println!("[mcu-rom] GPIO init failed: {:?}", e);
