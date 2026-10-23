@@ -2231,6 +2231,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "caliptra-mcu-rgpio"
+version = "0.1.0"
+dependencies = [
+ "tock-registers",
+]
+
+[[package]]
 name = "caliptra-mcu-rom-common"
 version = "0.1.0"
 dependencies = [
