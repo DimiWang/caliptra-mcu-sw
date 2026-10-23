@@ -97,6 +97,11 @@ impl<Access> HandOff<Access> {
         self.deref().stable_owner_key()
     }
 
+    /// Return the DOT blob ROM fetched from the BMC, if any.
+    pub fn dot_blob(&self) -> Option<&[u8; caliptra_mcu_romtime::handoff::DOT_BLOB_HANDOFF_SIZE]> {
+        self.deref().dot_blob()
+    }
+
     /// Get the address of the handoff table.
     pub fn addr(&self) -> *const HandoffData {
         // Safety: Linker MUST place this static object in the `.handoff` section.

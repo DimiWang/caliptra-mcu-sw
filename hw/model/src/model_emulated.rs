@@ -373,6 +373,9 @@ impl McuHwModel for ModelEmulated {
             if params.force_fuse_owner_pk_hash {
                 wire1 |= 1 << 28;
             }
+            if params.dot_flash_absent {
+                wire1 |= 1 << 27;
+            }
             [0, wire1]
         };
         let mci_regs = ext_mci.regs.clone();
@@ -714,6 +717,16 @@ impl McuHwModel for ModelEmulated {
 
     fn read_otp_memory(&self) -> Vec<u8> {
         self.otp_partitions.borrow().clone()
+    }
+
+    fn read_mcu_memory(&mut self, addr: u32, len: usize) -> Option<Vec<u8>> {
+        let mut out = Vec::with_capacity(len);
+        for word_addr in (addr..addr + len as u32).step_by(4) {
+            let word = self.cpu.bus.read(RvSize::Word, word_addr).ok()?;
+            out.extend_from_slice(&word.to_le_bytes());
+        }
+        out.truncate(len);
+        Some(out)
     }
 
     fn read_dot_flash(&self) -> Vec<u8> {

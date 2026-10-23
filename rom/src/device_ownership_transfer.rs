@@ -31,6 +31,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const DOT_LABEL: &[u8; 23] = b"Caliptra DOT stable key";
 pub const DOT_BLOB_SIZE: usize = core::mem::size_of::<DotBlob>();
+const _: () = assert!(DOT_BLOB_SIZE == caliptra_mcu_romtime::handoff::DOT_BLOB_HANDOFF_SIZE);
 
 #[derive(Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, PartialEq, Eq)]
 pub struct LakPkHash(pub [u32; 12]);
@@ -51,6 +52,11 @@ pub enum OwnerPkHashPolicy {
 /// Platform ROMs that support it read this bit and set
 /// [`crate::RomParameters::owner_pk_hash_policy`] to [`OwnerPkHashPolicy::ForceFuse`].
 pub const FORCE_FUSE_OWNER_PK_HASH_WIRE_BIT: u32 = 1 << 28;
+
+/// MCI `generic_input_wires[1]` bit reserved for the DOT-flash-absent strap.
+/// Platform ROMs that support it leave [`crate::RomParameters::dot_flash`]
+/// unset when this bit is high, so the DOT blob is requested from the BMC.
+pub const DOT_FLASH_ABSENT_WIRE_BIT: u32 = 1 << 27;
 
 #[derive(Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 pub struct RecoveryPkHash(pub [u32; 12]);

@@ -123,6 +123,9 @@ mod test {
         /// If true, drive the MCI generic input wire strap that forces the ROM
         /// to use the `CPTRA_SS_OWNER_PK_HASH` fuse as the owner, bypassing DOT.
         pub force_fuse_owner_pk_hash: bool,
+        /// If true, drive the strap telling the ROM that the
+        /// DOT flash is not attached.
+        pub dot_flash_absent: bool,
         /// Optional custom MCU ROM bytes (overrides the default/compiled ROM).
         pub custom_mcu_rom: Option<Vec<u8>>,
         /// Optional custom MCU runtime bytes (overrides the default/compiled runtime).
@@ -177,6 +180,7 @@ mod test {
                 fips_zeroization: false,
                 ocp_lock_en: false,
                 force_fuse_owner_pk_hash: false,
+                dot_flash_absent: false,
                 custom_mcu_rom: None,
                 custom_mcu_runtime: None,
                 firmware_prefix: None,
@@ -952,6 +956,7 @@ mod test {
             ocp_lock_en: params.ocp_lock_en,
             fips_zeroization: params.fips_zeroization,
             force_fuse_owner_pk_hash: params.force_fuse_owner_pk_hash,
+            dot_flash_absent: params.dot_flash_absent,
             debug_intent: params.debug_intent,
             prod_dbg_unlock_keypairs: params
                 .prod_dbg_unlock_keypairs

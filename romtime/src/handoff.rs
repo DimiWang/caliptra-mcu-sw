@@ -12,7 +12,7 @@ pub const FHT_MARKER: u32 = 0x4855434D;
 pub const FHT_MAJOR_VERSION: u16 = 1;
 
 /// Minor version of the handoff table.
-pub const FHT_MINOR_VERSION: u16 = 3;
+pub const FHT_MINOR_VERSION: u16 = 4;
 
 /// Minor version that introduced the stable owner key handoff.
 pub const STABLE_OWNER_KEY_FHT_MINOR_VERSION: u16 = 1;
@@ -22,6 +22,18 @@ pub const FIRMWARE_BOOT_TYPE_FHT_MINOR_VERSION: u16 = 2;
 
 /// Minor version that introduced the MCU ROM capabilities handoff.
 pub const MCU_ROM_CAPABILITIES_FHT_MINOR_VERSION: u16 = 3;
+
+/// Handoff minor version that introduced the BMC-provided DOT blob slot.
+pub const DOT_BLOB_FHT_MINOR_VERSION: u16 = 4;
+
+/// Size of the DOT blob carried in the handoff table.
+pub const DOT_BLOB_HANDOFF_SIZE: usize = 168;
+
+/// Marks the DOT blob handoff slot as populated ("DOTB").
+pub const DOT_BLOB_VALID_MARKER: u32 = 0x42544F44;
+
+/// DOT blob handoff source: the blob was fetched from the BMC and verified.
+pub const DOT_BLOB_SOURCE_BMC: u32 = 1;
 
 /// Size of an encrypted Caliptra Cryptographic Manager key blob.
 pub const STABLE_OWNER_KEY_CMK_SIZE: usize = caliptra_api::mailbox::CMK_SIZE_BYTES;
@@ -192,6 +204,51 @@ impl StableOwnerKeyHandoff {
     }
 }
 
+/// DOT blob fetched from the BMC and verified by ROM.
+///
+/// ROM fills this slot only when the DOT blob did not come from on-chip
+/// flash (flash absent or its blob invalid), so Runtime can use the blob
+/// without flash. It is left invalid (marker 0) for flash-sourced DOT.
+#[derive(TryFromBytes, IntoBytes, KnownLayout, Immutable, Clone)]
+#[repr(C)]
+pub struct DotBlobHandoff {
+    /// Raw DOT blob bytes.
+    pub blob: [u8; DOT_BLOB_HANDOFF_SIZE],
+
+    /// Where the blob came from (`DOT_BLOB_SOURCE_*`).
+    pub source: u32,
+
+    /// Written after `blob` and `source` to indicate the slot is valid.
+    pub valid_marker: u32,
+}
+
+impl Default for DotBlobHandoff {
+    fn default() -> Self {
+        Self {
+            blob: [0; DOT_BLOB_HANDOFF_SIZE],
+            source: 0,
+            valid_marker: 0,
+        }
+    }
+}
+
+impl core::fmt::Debug for DotBlobHandoff {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("DotBlobHandoff")
+            .field("source", &self.source)
+            .field("valid", &self.blob().is_some())
+            .finish()
+    }
+}
+
+impl DotBlobHandoff {
+    /// Return the DOT blob when ROM completed the handoff.
+    pub fn blob(&self) -> Option<&[u8; DOT_BLOB_HANDOFF_SIZE]> {
+        (self.valid_marker == DOT_BLOB_VALID_MARKER).then_some(&self.blob)
+    }
+}
+
 /// Top-level handoff structure stored in DCCM.
 /// Resident at a well-known location in DCCM.
 ///
@@ -214,6 +271,9 @@ pub struct HandoffData {
     /// This field is appended after the original 128-byte layout so the ROM and
     /// Runtime table offsets remain compatible with handoff version 1.0.
     pub rom_stable_owner_key: StableOwnerKeyHandoff,
+
+    /// DOT blob fetched from the BMC (appended in handoff version 1.4).
+    pub rom_dot_blob: DotBlobHandoff,
 }
 
 // Keep the original tables fixed so append-only extensions do not move either ABI.
@@ -225,7 +285,9 @@ const _: () = assert!(core::mem::size_of::<StableOwnerKeyHandoff>() == 132);
 const _: () = assert!(core::mem::offset_of!(HandoffData, rom) == 0);
 const _: () = assert!(core::mem::offset_of!(HandoffData, runtime) == 64);
 const _: () = assert!(core::mem::offset_of!(HandoffData, rom_stable_owner_key) == 128);
-const _: () = assert!(core::mem::size_of::<HandoffData>() == 260);
+const _: () = assert!(core::mem::size_of::<DotBlobHandoff>() == 176);
+const _: () = assert!(core::mem::offset_of!(HandoffData, rom_dot_blob) == 260);
+const _: () = assert!(core::mem::size_of::<HandoffData>() == 436);
 
 // Enforce that the handoff data structure fits within the reserved 1KB region.
 const _: () = assert!(core::mem::size_of::<HandoffData>() <= 1024);
@@ -293,6 +355,14 @@ impl HandoffData {
         self.rom_stable_owner_key.cmk()
     }
 
+    /// Return the BMC-provided DOT blob when this handoff version supports it.
+    pub fn dot_blob(&self) -> Option<&[u8; DOT_BLOB_HANDOFF_SIZE]> {
+        if self.rom.fht_minor_ver < DOT_BLOB_FHT_MINOR_VERSION {
+            return None;
+        }
+        self.rom_dot_blob.blob()
+    }
+
     /// Persist handoff data structure from the given arguments.
     pub fn write(_args: HandoffArgs) {
         println!(
@@ -317,6 +387,7 @@ impl HandoffData {
                 },
                 runtime: RuntimeHandoffTable::default(),
                 rom_stable_owner_key: StableOwnerKeyHandoff::default(),
+                rom_dot_blob: DotBlobHandoff::default(),
             }
         }
     }
@@ -339,6 +410,21 @@ impl HandoffData {
             (*handoff).rom_stable_owner_key.valid_marker = 0;
             (*handoff).rom_stable_owner_key.cmk = *cmk;
             (*handoff).rom_stable_owner_key.valid_marker = STABLE_OWNER_KEY_VALID_MARKER;
+        }
+    }
+}
+
+impl HandoffData {
+    /// Persist a verified DOT blob for Runtime.
+    pub fn write_dot_blob(blob: &[u8; DOT_BLOB_HANDOFF_SIZE], source: u32) {
+        // Safety: ROM owns the handoff table while constructing data for Runtime.
+        // Invalidate first and publish the marker only after the full blob is present.
+        unsafe {
+            let handoff = &raw mut HANDOFF;
+            (*handoff).rom_dot_blob.valid_marker = 0;
+            (*handoff).rom_dot_blob.blob = *blob;
+            (*handoff).rom_dot_blob.source = source;
+            (*handoff).rom_dot_blob.valid_marker = DOT_BLOB_VALID_MARKER;
         }
     }
 }
@@ -370,6 +456,11 @@ pub static mut HANDOFF: HandoffData = HandoffData {
     runtime: RuntimeHandoffTable { reserved: [0; 64] },
     rom_stable_owner_key: StableOwnerKeyHandoff {
         cmk: [0; STABLE_OWNER_KEY_CMK_SIZE],
+        valid_marker: 0,
+    },
+    rom_dot_blob: DotBlobHandoff {
+        blob: [0; DOT_BLOB_HANDOFF_SIZE],
+        source: 0,
         valid_marker: 0,
     },
 };
@@ -411,7 +502,21 @@ mod tests {
         assert_eq!(offset_of!(HandoffData, rom), 0);
         assert_eq!(offset_of!(HandoffData, runtime), 64);
         assert_eq!(offset_of!(HandoffData, rom_stable_owner_key), 128);
-        assert_eq!(size_of::<HandoffData>(), 260);
+        assert_eq!(size_of::<DotBlobHandoff>(), 176);
+        assert_eq!(offset_of!(HandoffData, rom_dot_blob), 260);
+        assert_eq!(size_of::<HandoffData>(), 436);
+    }
+
+    #[test]
+    fn dot_blob_requires_valid_marker_and_version() {
+        let mut handoff = HandoffData::default();
+        handoff.rom.fht_minor_ver = DOT_BLOB_FHT_MINOR_VERSION;
+        assert!(handoff.dot_blob().is_none());
+        handoff.rom_dot_blob.blob = [0x5A; DOT_BLOB_HANDOFF_SIZE];
+        handoff.rom_dot_blob.valid_marker = DOT_BLOB_VALID_MARKER;
+        assert_eq!(handoff.dot_blob(), Some(&[0x5A; DOT_BLOB_HANDOFF_SIZE]));
+        handoff.rom.fht_minor_ver = DOT_BLOB_FHT_MINOR_VERSION - 1;
+        assert!(handoff.dot_blob().is_none());
     }
 
     #[test]

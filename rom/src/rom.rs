@@ -950,6 +950,11 @@ pub struct RomParameters<'a> {
     pub dot_recovery_handler: Option<&'a dyn crate::DotRecoveryHandler>,
     /// Whether to attempt backup-blob recovery.
     pub dot_recovery_policy: DotRecoveryPolicy,
+    /// BMC-backed DOT blob source. When set, the ROM requests the DOT blob
+    /// from the BMC if `dot_flash` is not attached or its blob is empty or
+    /// fails verification. The failure is reported to the BMC via the
+    /// recovery interface DEVICE_STATUS before the request.
+    pub dot_bmc_source: Option<&'a dyn crate::DotRecoveryHandler>,
     /// Whether to check for and process the MCU Component SVN Manifest header.
     /// When true, ROM looks for the manifest magic after the static
     /// `mcu_image_header_size` plus any DOT section, validates it, and

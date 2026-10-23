@@ -62,6 +62,8 @@ test-streaming-boot-flash-write-back = ["streaming-boot"]
 active-i3c1 = ["caliptra-mcu-config-emulator/active-i3c1"]
 test-i3c-services = ["caliptra-mcu-rom-common/test-i3c-services"]
 test-dot-recovery-reset-flow = ["caliptra-mcu-rom-common/test-dot-recovery-reset-flow"]
+# Opt out of the default BMC DOT blob fallback.
+no-dot-bmc-source = []
 test-rom-hooks = []
 test-usb-ocp-recovery = ["hw-2-1"]
 test-network-mbox-comm = ["caliptra-mcu-network-drivers", "caliptra-mcu-network-hil"]
