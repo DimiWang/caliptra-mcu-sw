@@ -19,6 +19,7 @@ caliptra-mcu-usb-emulator.workspace = true
 caliptra-mcu-ocp.workspace = true
 caliptra-mcu-image-header.workspace = true
 caliptra-mcu-network-drivers = { workspace = true, optional = true }
+caliptra-mcu-rgpio = { workspace = true, optional = true }
 caliptra-mcu-network-hil = { workspace = true, optional = true }
 caliptra-mcu-rom-common.workspace = true
 caliptra-mcu-registers-generated.workspace = true
@@ -42,6 +43,9 @@ ocp-lock = ["caliptra-mcu-rom-common/ocp-lock"]
 stable-owner-key = ["caliptra-mcu-rom-common/stable-owner-key"]
 cfi = ["caliptra-mcu-rom-common/cfi"]
 test-dot-recovery = []
+# Initialize Janus RGPIO ports from JANUS_PIN_MAP at the very start of ROM.
+# Off by default: emulator/FPGA do not map the GPIO/PORT addresses.
+janus-gpio = ["dep:caliptra-mcu-rgpio"]
 test-firmware-activate = []
 test-firmware-update-flash = ["flash-boot", "use-flash-partition-table"]
 test-firmware-update-reject = ["flash-boot"]

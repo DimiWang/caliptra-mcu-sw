@@ -2282,6 +2282,7 @@ dependencies = [
  "caliptra-mcu-network-hil",
  "caliptra-mcu-ocp",
  "caliptra-mcu-registers-generated",
+ "caliptra-mcu-rgpio",
  "caliptra-mcu-rom-common",
  "caliptra-mcu-romtime",
  "caliptra-mcu-usb-emulator",
